@@ -1,0 +1,476 @@
+#!/bin/bash
+# ========================================================
+#    ZMTURBO V1.3.5 (MODULAR)
+#    - Feature: Zombie Slayer (PGID Kill)
+#    - Feature: Resource Usage (CPU/RAM per job)
+#    - WARN: Displays IO Wait % (Anti-Hang Indicator)
+# ========================================================
+#
+# MIT License
+#
+# Copyright (c) 2024 ddt-mmt
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+
+if [ -n "$SUDO_USER" ]; then REAL_USER="$SUDO_USER"; else REAL_USER="$USER"; fi
+
+# FIX: Use standard HOME to match zturbo output location
+# DASHBOARD_DIR moved to RAM for real-time speed
+DASHBOARD_DIR="/dev/shm/zturbo_v2_dashboard"
+REPORT_DIR="$HOME/.zturbo_v2/reports"
+mkdir -p "$DASHBOARD_DIR" "$REPORT_DIR"
+
+# CONFIG: REFRESH RATE (Detik)
+REFRESH_RATE=1
+
+
+G='\033[1;32m'; Y='\033[1;33m'; R='\033[1;31m'; C='\033[1;36m'; W='\033[1;37m'; NC='\033[0m'; GREY='\033[0;90m'
+K='\033[K' # Clear to end of line
+trap 'echo -e "\n${R}Exiting Monitor...${NC}"; printf "\033[?25h"; exit 0' SIGINT
+
+ALL_BLOCK="█████████████████████████" # 25 chars
+ALL_EMPTY="░░░░░░░░░░░░░░░░░░░░░░░░░"
+
+draw_bar() {
+    local p=$1
+    local w=25
+    local f=$((p * w / 100))
+    if [[ $f -lt 0 ]]; then f=0; fi
+    if [[ $f -gt $w ]]; then f=$w; fi
+    local remain=$((w - f))
+    echo -ne "[${G}${ALL_BLOCK:0:f}${GREY}${ALL_EMPTY:0:remain}${NC}]"
+}
+
+fmt_size() {
+    local v=$1
+    if [[ $v -ge 1073741824 ]]; then awk -v v=$v 'BEGIN{printf "%.1fG", v/1073741824}'
+    elif [[ $v -ge 1048576 ]]; then awk -v v=$v 'BEGIN{printf "%.1fM", v/1048576}'
+    elif [[ $v -ge 1024 ]]; then awk -v v=$v 'BEGIN{printf "%.1fK", v/1024}'
+    else echo "${v}B"; fi
+}
+
+fmt_bps() {
+    local bytes_per_sec=$1
+    local bits_per_sec=$(( bytes_per_sec * 8 ))
+    if [[ $bits_per_sec -ge 1000000000 ]]; then awk -v v=$bits_per_sec 'BEGIN{printf "%.1f Gbps", v/1000000000}'
+    elif [[ $bits_per_sec -ge 1000000 ]]; then awk -v v=$bits_per_sec 'BEGIN{printf "%.1f Mbps", v/1000000}'
+    elif [[ $bits_per_sec -ge 1000 ]]; then awk -v v=$bits_per_sec 'BEGIN{printf "%.1f Kbps", v/1000}'
+    else echo "${bits_per_sec} bps"; fi
+}
+
+fmt_time() {
+    local T=$1
+    if [ $T -gt 86400 ]; then printf ">24h"
+    elif [ $T -gt 3600 ]; then printf "%dh%02dm" $((T/3600)) $(( (T%3600)/60 ))
+    else printf "%02dm%02ds" $(( (T%3600)/60 )) $((T%60)); fi
+}
+
+show_footer() {
+    echo -e "${K}"
+    echo -e "${C}═════════════════════════════════════════════════════════════════════════════════${NC}${K}"
+    echo -e "$1${K}"
+    echo -e "${C}═════════════════════════════════════════════════════════════════════════════════${NC}${K}"
+    printf "\033[?25h" # Show Cursor for Input
+    echo -n " 👉 INPUT > "
+}
+
+# --- STATE VARIABLES ---
+declare -A PREV_SIZE
+declare -A PREV_TIME
+declare PREV_CPU_TOTAL
+declare PREV_CPU_IOWAIT
+RX_PREV=0; TX_PREV=0; TIME_PREV=0
+LOOP_IDX=0
+CACHED_IFACE=""
+
+    # --- MAIN LOOP ---
+    echo ">> [DEBUG] zmturbo: Starting main loop, looking for job directories in ${DASHBOARD_DIR}" # Debugging line
+    while true; do
+        printf "\033[?25l\033[H" # Hide Cursor + Move to top
+    MY_IP=$(hostname -I | awk '{print $1}')
+    
+    # --- EFFICIENT SYSTEM HEALTH CHECK (RESTORED) ---
+    read -r _ user nice system idle iowait irq softirq steal _ _ < <(grep '^cpu ' /proc/stat)
+    if [ -n "$PREV_CPU_TOTAL" ]; then
+        CPU_TOTAL=$((user + nice + system + idle + iowait + irq + softirq + steal))
+        CPU_DELTA=$((CPU_TOTAL - PREV_CPU_TOTAL))
+        CPU_IOWAIT_DELTA=$((iowait - PREV_CPU_IOWAIT))
+        if [ "$CPU_DELTA" -gt 0 ]; then IOWAIT=$((CPU_IOWAIT_DELTA * 100 / CPU_DELTA)); else IOWAIT=0; fi
+    else
+        IOWAIT=0
+    fi
+    PREV_CPU_TOTAL=$((user + nice + system + idle + iowait + irq + softirq + steal))
+    PREV_CPU_IOWAIT=$iowait
+    
+    if [ -z "$IOWAIT" ]; then IOWAIT=0; fi
+
+    read LOAD _ < /proc/loadavg
+    read MEM_TOT_KB < <(grep MemTotal /proc/meminfo | awk '{print $2}')
+    read MEM_AVAIL_KB < <(grep MemAvailable /proc/meminfo | awk '{print $2}')
+    MEM_TOT=$((MEM_TOT_KB / 1024))
+    MEM_USED=$(( (MEM_TOT_KB - MEM_AVAIL_KB) / 1024))
+    [ "$MEM_TOT" -gt 0 ] && MEM_PERC=$((MEM_USED * 100 / MEM_TOT)) || MEM_PERC=0
+    
+    [[ "$IOWAIT" -gt 30 ]] && IO_COL=$R || IO_COL=$G
+    if [[ $MEM_PERC -gt 80 ]]; then MEM_COL=$R; elif [[ $MEM_PERC -gt 50 ]]; then MEM_COL=$Y; else MEM_COL=$G; fi
+
+    # --- Network Speed Calculation ---
+    if [[ -z "$CACHED_IFACE" ]]; then
+        CACHED_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+        [[ -z "$CACHED_IFACE" ]] && CACHED_IFACE=$(awk -F: '$2 > 0 {print $1; exit}' /proc/net/dev | xargs)
+    fi
+    IFACE="$CACHED_IFACE"
+    
+    if [[ -n "$IFACE" ]]; then
+        read RX_NOW TX_NOW < <(awk -v iface="$IFACE:" '$1 == iface {print $2, $10}' /proc/net/dev)
+        NOW_TS_NET=$(date +%s%N)
+        if [[ $TIME_PREV -gt 0 ]]; then
+            NOW_SEC=$(date +%s); PREV_SEC=${TIME_PREV::-9}
+            DELTA_T=$((NOW_SEC - PREV_SEC)); [[ $DELTA_T -eq 0 ]] && DELTA_T=1
+            RX_SPD=$(( (RX_NOW - RX_PREV) / DELTA_T )); TX_SPD=$(( (TX_NOW - TX_PREV) / DELTA_T ))
+            
+            # Format Bytes/s and Bits/s
+            RX_FMT="$(fmt_size $RX_SPD)/s ($(fmt_bps $RX_SPD))"
+            TX_FMT="$(fmt_size $TX_SPD)/s ($(fmt_bps $TX_SPD))"
+        else
+            RX_FMT=".../s"
+            TX_FMT=".../s"
+        fi
+        RX_PREV=$RX_NOW; TX_PREV=$TX_NOW; TIME_PREV=$NOW_TS_NET
+    fi
+
+    # --- HEADER DISPLAY ---
+    MEM_GUARD=$(( MEM_TOT * 20 / 100 )); MEM_SAFE=$(( MEM_TOT * 80 / 100 ))
+    MAX_THREADS_SAFE=$(( MEM_SAFE / 60 )); [ $MAX_THREADS_SAFE -lt 2 ] && MAX_THREADS_SAFE=2
+
+    echo -e "${C}=== ZMTURBO V1.3.5 (MODULAR) ===${NC}${K}"
+    echo -e "HOST : ${W}$(hostname)${NC} | IP: ${Y}$MY_IP${NC} ($IFACE) | USER: ${Y}$REAL_USER${NC}${K}"
+    echo -e "STATS: CPU: ${W}$LOAD${NC} | RAM: ${MEM_COL}${MEM_PERC}%${NC} | IO: ${IO_COL}${IOWAIT}%${NC} | NET: ${G}⬇$RX_FMT ⬆$TX_FMT${NC}${K}"
+    echo -e "LIMIT: Max Threads: ${G}$MAX_THREADS_SAFE${NC} | OS Guard: ${Y}${MEM_GUARD}MB${NC}${K}"
+
+    unset active_transfers
+    declare -a active_transfers
+
+    # --- ASYNC DU-BASED DATA COLLECTION (RESTORED & OPTIMIZED) ---
+    RUN_DU=false
+    if [ $((LOOP_IDX % 5)) -eq 0 ]; then RUN_DU=true; fi
+    NOW_TS=$(date +%s)
+    
+    unset processed_pids # Reset untuk setiap siklus
+    declare -A processed_pids
+
+    shopt -s nullglob
+    for job_dir in "$DASHBOARD_DIR"/*/; do
+        if [ -f "${job_dir}/pid" ]; then
+            pid=$(cat "${job_dir}/pid" 2>/dev/null | tr -d ' \n')
+            
+            if [ -z "${pid}" ] || [[ -n "${processed_pids[$pid]}" ]]; then
+                continue
+            fi
+            processed_pids[$pid]=1
+
+            if ps -p "${pid}" > /dev/null 2>&1; then
+                job_info=$(cat "${job_dir}/info" 2>/dev/null)
+                IFS='|' read -r job_id owner mode dest sources total_size <<< "${job_info}"
+                
+                # --- CPU & Thread Calc ---
+                children_list=$(pgrep -P "$pid" 2>/dev/null)
+                all_pids="$pid ${children_list:-}"
+                proc_count=$(echo "$all_pids" | wc -w)
+                cpu_usage=$(ps -p $all_pids -o %cpu --no-headers 2>/dev/null | awk '{sum+=$1} END {if (sum=="") print "0.0"; else printf "%.1f", sum}')
+
+                CACHE_FILE="${job_dir}/zmturbo_cache"
+                META_FILE="${job_dir}/zmturbo_meta"
+                STATUS_FILE="${job_dir}/status"
+                DU_RES_FILE="${job_dir}/du.res"
+                DU_LOCK="${job_dir}/du.lock"
+
+                curr=0; SPEED_TXT="-"; ETA_TXT="-"
+                
+                # --- OPTIMIZATION: REAL-TIME PROGRESS FROM RSYNC STATUS ---
+                # Format: transferred|total|perc|speed|file|state
+                if [ -f "$STATUS_FILE" ]; then
+                    IFS='|' read -r r_curr r_total r_perc r_speed r_file r_state < "$STATUS_FILE"
+                    if [[ "$r_curr" =~ ^[0-9]+$ ]] && [ "$r_curr" -gt 0 ]; then
+                        curr=$r_curr
+                        SPEED_TXT="$r_speed"
+                        PERC_TXT="$r_perc"
+                        perc="${r_perc%\%}"
+                        # If we have speed, estimate ETA locally to be even more real-time
+                        # (simplified, but works fine from RAM)
+                    fi
+                fi
+
+                # Fallback to cache if status is not ready or available
+                if [ "$curr" -eq 0 ] && [ -f "$CACHE_FILE" ]; then curr=$(cat "$CACHE_FILE" 2>/dev/null); fi
+                if [ "$SPEED_TXT" == "-" ] && [ -f "$META_FILE" ]; then IFS='|' read -r SPEED_TXT ETA_TXT < "$META_FILE"; fi
+                
+                # Cek hasil perhitungan disk (du) di background as fallback or sync
+                if [ -f "$DU_RES_FILE" ]; then
+                    NEW_VAL=$(cat "$DU_RES_FILE" 2>/dev/null)
+                    if [[ "$NEW_VAL" =~ ^[0-9]+$ ]]; then
+                         curr=$NEW_VAL
+                         echo "$curr" > "$CACHE_FILE"
+                         rm -f "$DU_RES_FILE"
+                         
+                         if [ -n "${PREV_SIZE[$pid]}" ]; then
+                             delta_bytes=$(( curr - ${PREV_SIZE[$pid]} ))
+                             delta_time=$(( NOW_TS - ${PREV_TIME[$pid]} ))
+                             if [ $delta_time -gt 0 ] && [ $delta_bytes -ge 0 ]; then
+                                 spd=$(( delta_bytes / delta_time ))
+                                 if [ $spd -gt 0 ]; then
+                                     SPEED_TXT="$(fmt_size $spd)/s"
+                                     if [[ "$total_size" =~ ^[0-9]+$ ]] && [ "$total_size" -gt 0 ]; then
+                                         rem_bytes=$(( total_size - curr ))
+                                         eta_sec=$(( rem_bytes / spd ))
+                                         ETA_TXT=$(fmt_time $eta_sec)
+                                     else
+                                         ETA_TXT="?"
+                                     fi
+                                 else
+                                     SPEED_TXT="0B/s"; ETA_TXT="Stalled"
+                                 fi
+                                 echo "$SPEED_TXT|$ETA_TXT" > "$META_FILE"
+                             fi
+                         fi
+                         PREV_SIZE[$pid]=$curr; PREV_TIME[$pid]=$NOW_TS
+                    else
+                         rm -f "$DU_RES_FILE"
+                    fi
+                fi
+
+                # Picu perhitungan (du) di background setiap 5 siklus (5 detik)
+                if [ "$RUN_DU" = true ] && [ ! -f "$DU_LOCK" ] && [ -n "$dest" ]; then
+                     touch "$DU_LOCK"
+                     (
+                         val=$(timeout 15 du -sb "$dest" 2>/dev/null | cut -f1)
+                         [ -n "$val" ] && echo "$val" > "$DU_RES_FILE"
+                         rm -f "$DU_LOCK"
+                     ) &
+                fi
+                
+                [ -z "$curr" ] && curr=0; [ -z "$SPEED_TXT" ] && SPEED_TXT="-"; [ -z "$ETA_TXT" ] && ETA_TXT="-"
+
+                perc=0
+                if [[ "$total_size" =~ ^[0-9]+$ ]] && [ "$total_size" -gt 0 ]; then 
+                    perc=$((curr * 100 / total_size))
+                fi
+                [ $perc -gt 100 ] && perc=100
+                PERC_TXT="${perc}%"
+                
+                info_string="${pid}|${owner}|${cpu_usage}|${proc_count}|${SPEED_TXT}|${ETA_TXT}|${perc}|${PERC_TXT}|${sources}|${dest}"
+                active_transfers+=("$info_string")
+            else
+                # Bersihkan direktori pekerjaan yang ditinggalkan jika proses utamanya sudah tidak ada (hanya jika zmturbo yang mematikannya)
+                # ini akan dibersihkan oleh zturbo itu sendiri
+                if [ -d "${job_dir}" ] && [ ! -f "${job_dir}/pid" ]; then # Hanya hapus jika pid file tidak ada
+                    rm -rf "${job_dir}" 2>/dev/null
+                fi
+            fi
+        fi
+    done
+
+    # [A] ACTIVE TRANSFERS
+    echo -e "${K}\n${Y}[ 🚀 ACTIVE TRANSFERS ]${NC}${K}"
+    if [ ${#active_transfers[@]} -eq 0 ]; then
+        echo -e "   ${GREY}💤 No active transfers detected. Waiting for jobs...${NC}${K}"
+    else
+        printf "% -7s % -8s % -6s % -5s % -12s % -12s % -26s${K}\n" "PID" "USER" "CPU%" "THRD" "SPEED" "ETA" "PROGRESS"
+        echo -e "───────────────────────────────────────────────────────────────────────────────────────────────${K}"
+        for item in "${active_transfers[@]}"; do
+            IFS='|' read -r pid owner cpu_usage proc_count SPEED_TXT ETA_TXT perc PERC_TXT src dest <<< "$item"
+            BAR=$(draw_bar $perc)
+            [[ "$owner" == "$REAL_USER" ]] && CL=$G || CL=$W
+            printf "${CL}%-7s %-8s %-6s %-5s %-12s %-12s %-26s${NC}${K}\n" "$pid" "$owner" "$cpu_usage" "$proc_count" "$SPEED_TXT" "$ETA_TXT" "$BAR $PERC_TXT"
+        done
+    fi
+
+    # [B] ACTIVE ROUTES
+    echo -e "${K}\n${Y}[ 📂 ACTIVE ROUTES (SRC ➔ DST) ]${NC}${K}"
+    if [ ${#active_transfers[@]} -gt 0 ]; then
+        for item in "${active_transfers[@]}"; do
+            IFS='|' read -r pid owner _ _ _ _ _ _ src dest <<< "$item"
+            echo -e "${GREY}   ● ${pid}: ${src}  ➔   ${dest}${NC}${K}"
+        done
+    else
+        echo -e "   ${GREY}   (No routes to display)${NC}${K}"
+    fi
+
+    # [C] STORAGE STATUS
+    echo -e "${K}\n${Y}[ 💾 STORAGE STATUS (MAIN DRIVES) ]${NC}${K}"
+    echo -e "───────────────────────────────────────────────────────────────────────────────────────────────${K}"
+    printf " %-24s %-9s %-9s %-7s %s${K}\n" "MOUNT POINT" "SIZE" "FREE" "USE%" "SOURCE"
+    
+    # Filter only relevant drives (exclude tmpfs, loop, boot, dev, sys, run, snap)
+    df -h --output=target,size,avail,pcent,source | sed '1d' | grep -E -v '^/(dev|proc|sys|run|snap|boot|var/lib|etc)($|/)' | grep -E -v 'tmpfs|devtmpfs' | head -n 6 | while read -r mnt sz fr pcent src; do
+        perc_num="${pcent%\%}"
+        # Clean up any whitespace in percentage
+        perc_num="${perc_num// /}"
+        
+        p_col=$G
+        if [[ "$perc_num" =~ ^[0-9]+$ ]]; then
+            if [ "$perc_num" -ge 90 ]; then p_col=$R
+            elif [ "$perc_num" -ge 75 ]; then p_col=$Y; fi
+        fi
+        
+        # Truncate long mount paths for neatness
+        if [ ${#mnt} -gt 24 ]; then mnt_disp="${mnt:0:21}..."; else mnt_disp="$mnt"; fi
+        
+        printf " %-24s %-9s %-9s ${p_col}%-7s${NC} ${GREY}%s${NC}${K}\n" "$mnt_disp" "$sz" "$fr" "$pcent" "$src"
+    done
+    
+    printf "\033[J" # Clear rest of screen
+    show_footer "[R] Refresh | [K] Kill Menu | [E] Panic Clean | [H] History | [Q] Quit"
+    
+    # Smart Wait (Responsive Input)
+    key=""
+    # Coba baca kunci beberapa kali dalam satu detik untuk responsivitas
+    for (( i=0; i<10; i++ )); do # Loop 10 kali dalam 1 detik (0.1 detik per iterasi)
+        read -t 0.1 -n 1 -s key
+        if [[ -n "$key" ]]; then break; fi # Jika kunci ditekan, keluar dari loop
+    done
+    ((LOOP_IDX++))
+
+    if [[ "${key^^}" == "Q" ]]; then exit 0; fi
+
+    # --- EMERGENCY / PANIC CLEAN ---
+    if [[ "${key^^}" == "E" ]]; then
+        clear
+        echo -e "${R}>>> 💥 EMERGENCY PANIC CLEAN (SAPU JAGAT) <<<${NC}"
+        echo -e "${Y}This feature will FORCE kill all processes related to:${NC}"
+        echo -e " - zturbo, zmturbo (Dashboard)"
+        echo -e " - rsync, fpsync, fpart (Transfer Engine)"
+        echo -e "Owned by User: ${W}$REAL_USER${NC}"
+        echo "─────────────────────────────────────────────────────"
+        read -e -p "ARE YOU SURE YOU WANT TO CLEAN EVERYTHING? (y/n): " conf
+        if [[ "${conf^^}" == "Y" ]]; then
+            echo -e "\n${R}💥 BOOM! Sending kill signal to all related processes...${NC}"
+            if [ "$REAL_USER" == "root" ]; then
+                pkill -9 -f "zturbo|zmturbo|rsync|fpsync|fpart"
+            else
+                pkill -9 -u "$REAL_USER" -f "zturbo|zmturbo|rsync|fpsync|fpart"
+            fi
+            sleep 1; echo "Done. Exiting..."; exit 0
+        fi
+    fi
+    
+    # --- HISTORY MENU ---
+    if [[ "${key^^}" == "H" ]]; then
+        while true; do
+            clear; echo -e "${G}>>> 📜 JOB HISTORY (LAST 7 DAYS) <<<${NC}"
+            printf " %-4s | %-16s | %-10s | %-14b | %s\n" "NO" "TIMESTAMP" "USER" "STATUS" "JOB ID"
+            echo " ──────────────────────────────────────────────────────────────────────────────"
+            i=1; declare -a r_files; shopt -s nullglob
+            
+            # Use find to get files, sort by time (newest first), take top 15
+            while IFS= read -r f; do
+                [ -z "$f" ] && continue
+                status=$(grep "Final Status" "$f" 2>/dev/null | tail -1 | cut -d':' -f2 | xargs)
+                if [[ -z "$status" ]]; then status="UNKNOWN"; fi
+                
+                [[ "$status" == *"SUCCESS"* ]] && st_fmt="${G}SUCCESS ✅${NC}" 
+                [[ "$status" == *"WARNING"* ]] && st_fmt="${Y}WARNING ⚠️${NC}"
+                [[ "$status" == *"FAILED"* || "$status" == *"UNKNOWN"* ]] && st_fmt="${R}$status${NC}"
+                
+                # Format Date nicely
+                f_date=$(date -r "$f" "+%m-%d %H:%M:%S")
+                
+                printf " [%-2d] | %-16s | %-10s | %-24b | %s\n" "$i" "$f_date" "$(basename "$f" | cut -d'_' -f1)" "$st_fmt" "$(basename "$f")"
+                r_files[$i]="$f"; ((i++))
+            done < <(find "$REPORT_DIR" -maxdepth 1 -name "*.txt" -printf "%T@ %p\n" | sort -nr | head -n 15 | cut -d' ' -f2-)
+
+            [[ $i -eq 1 ]] && { echo " (No reports found)"; sleep 2; break; }
+            echo " ──────────────────────────────────────────────────────────────────────────────"
+            show_footer "[#] View Report | [B] Back"; read -e act
+            [[ "${act^^}" == "B" ]] && break
+            [[ "$act" =~ ^[0-9]+$ && "$act" -lt "$i" ]] && {
+                sel=${r_files[$act]};
+                clear; echo -e "${C}=== 📄 REPORT DETAILS: $(basename "$sel") ===${NC}\n"
+                
+                # Print Header
+                awk '/^>> Executing:/{exit} {print}' "$sel" | sed 's/^/   /'
+                
+                echo -e "\n   ${GREY}... (Detailed transfer logs omitted for brevity) ...${NC}\n"
+                
+                # Print Reconciliation
+                if grep -q "RECONCILIATION REPORT" "$sel"; then
+                    awk '/RECONCILIATION REPORT/{f=1} f{print "   " $0}' "$sel"
+                else
+                    echo -e "   ${R}>>> ⚠️ TRANSFER INTERRUPTED / NO RECONCILIATION REPORT <<<${NC}"
+                    tail -n 5 "$sel" | sed 's/^/   /'
+                fi
+                echo ""
+                show_footer "[ENTER] Back"; read -e sa
+            }
+        done
+    fi
+    
+    # --- KILL MENU ---
+    if [[ "${key^^}" == "K" ]]; then
+        while true; do
+            clear; echo -e "${R}>>> 🛑 PROCESS KILL MANAGER <<<${NC}"
+            i=1; declare -a kp kd; shopt -s nullglob
+            for job_dir in "$DASHBOARD_DIR"/*/; do
+                [ ! -d "$job_dir" ] && continue
+                pid_file="${job_dir}pid"
+                info_file="${job_dir}info"
+
+                if [ -f "$pid_file" ] && [ -f "$info_file" ]; then
+                    pid=$(cat "$pid_file" 2>/dev/null | tr -d ' \n')
+                    if [ -z "$pid" ] || ! ps -p "$pid" > /dev/null 2>&1; then
+                        continue
+                    fi
+
+                    IFS='|' read -r _ ow mode dest _ _ <<< "$(cat "$info_file")"
+
+                    if [ "$ow" == "$REAL_USER" ] || [ "$EUID" -eq 0 ]; then
+                        echo " [$i] PID: $pid | User: $ow | Task: $(basename "$dest")"
+                        kp[$i]="$pid"; kd[$i]="$job_dir"; ((i++))
+                    fi
+                fi
+            done
+            [[ $i -eq 1 ]] && { echo " (No active jobs)"; sleep 2; break; }
+            show_footer "[#] Terminate Job | [B] Back"; read -e act
+            [[ "${act^^}" == "B" ]] && break
+            [[ "$act" =~ ^[0-9]+$ && "$act" -lt "$i" ]] && {
+                t_pid=${kp[$act]}
+                t_dir=${kd[$act]}
+                read -e -p "Confirm termination of PID $t_pid? (y/n): " cf
+                if [[ "${cf^^}" == "Y" ]]; then
+                    echo -e " ${Y}NOTE: If process is in 'D' state (IO Wait), it cannot be killed.${NC}"
+                    PGID=$(ps -o pgid= -p "$t_pid" 2>/dev/null | grep -o '[0-9]*')
+                    if [ -n "$PGID" ]; then kill -TERM -- -"$PGID"; sleep 0.5; kill -KILL -- -"$PGID";
+                    else pkill -P "$t_pid"; kill "$t_pid"; fi
+                    
+                    # Read destination from info file before deleting
+                    if [ -f "${t_dir}info" ]; then
+                        IFS='|' read -r _ _ _ t_dest _ _ < "${t_dir}info"
+                        [ -n "$t_dest" ] && [ -d "$t_dest" ] && fuser -k -9 -m "$t_dest" &>/dev/null
+                    fi
+                    
+                    # Remove the entire job directory
+                    rm -rf "$t_dir"
+                    echo "Job PID $t_pid terminated and cleaned up."
+                    sleep 1
+                fi
+            }
+        done
+    fi
+done

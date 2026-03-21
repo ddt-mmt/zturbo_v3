@@ -1,0 +1,6 @@
+.config/
+pkg_temp/
+*.log
+zturbo_size_*
+dt_src_*
+dt_dest_*
