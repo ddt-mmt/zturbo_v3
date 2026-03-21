@@ -102,7 +102,7 @@ classDiagram
     }
     
     class Job_Management {
-        +/tmp/zturbo_dashboard/JOB_ID/
+        +/dev/shm/zturbo_v2_dashboard/JOB_ID/
         +-- pid
         +-- info
         +-- status
@@ -110,7 +110,7 @@ classDiagram
         +-- du.lock
         +-- zmturbo_cache
         +-- zmturbo_meta
-        +$HOME/.zturbo/reports/*.txt
+        +$HOME/.zturbo_v2/reports/*.txt
     }
     
     ZTURBO_Package *-- Modular_Scripts
