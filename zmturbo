@@ -87,11 +87,14 @@ show_footer() {
 # --- STATE VARIABLES ---
 declare -A PREV_SIZE
 declare -A PREV_TIME
+declare -A PREV_IF_RX
+declare -A PREV_IF_TX
 declare PREV_CPU_TOTAL
 declare PREV_CPU_IOWAIT
 RX_PREV=0; TX_PREV=0; TIME_PREV=0
 LOOP_IDX=0
 CACHED_IFACE=""
+declare -A IFACE_IP_CACHE
 
     # --- MAIN LOOP ---
     while true; do
@@ -99,6 +102,11 @@ CACHED_IFACE=""
     MY_IP_LIST=$(hostname -I | xargs)
     MY_IP=$(echo $MY_IP_LIST | awk '{print $1}')
     
+    # Refresh IFACE IP Cache every 30 seconds
+    if [[ $((LOOP_IDX % 30)) -eq 0 ]]; then
+        unset IFACE_IP_CACHE; declare -A IFACE_IP_CACHE
+        while read -r iface ip; do IFACE_IP_CACHE["$iface"]="$ip"; done < <(ip -o -4 addr show | awk '{print $2, $4}' | cut -d/ -f1)
+    fi
     # --- EFFICIENT SYSTEM HEALTH CHECK (RESTORED) ---
     read -r _ user nice system idle iowait irq softirq steal _ _ < <(grep '^cpu ' /proc/stat)
     if [ -n "$PREV_CPU_TOTAL" ]; then
@@ -294,6 +302,8 @@ CACHED_IFACE=""
 
     # [B] ACTIVE ROUTES
     echo -e "${K}\n${Y}[ 📂 ACTIVE ROUTES (SRC ➔ DST) ]${NC}${K}"
+    unset GLOBALLY_USED_IFACES
+    declare -A GLOBALLY_USED_IFACES
     if [ ${#active_transfers[@]} -gt 0 ]; then
         for item in "${active_transfers[@]}"; do
             IFS='|' read -r pid owner cpu_usage proc_count SPEED_TXT ETA_TXT perc PERC_TXT src dest <<< "$item"
@@ -301,12 +311,17 @@ CACHED_IFACE=""
             
             # --- Network Path Trace ---
             # 1. Try to find actual TCP socket for the process group
-            children_list=$(pgrep -P "$pid" 2>/dev/null)
-            p_list="$pid ${children_list:-}"
-            p_regex=$(echo "$p_list" | sed 's/ /|/g')
+            children_list=$(pgrep -P "$pid" 2>/dev/null | xargs)
+            p_list=$(echo "$pid ${children_list:-}" | xargs)
+            # tr is safer than sed for this regex building
+            p_regex=$(echo "$p_list" | tr ' ' '|')
             
             # Extract ALL Remote IPs from ss if available (handles IPv6 and multiple connections)
-            REMOTE_IPS=$(ss -ntp 2>/dev/null | grep -E ",pid=($p_regex)," | awk '{print $5}' | rev | cut -d: -f2- | rev | sort -u | tr -d '[]')
+            # Use grep with -E and handle empty regex case
+            REMOTE_IPS=""
+            if [ -n "$p_regex" ]; then
+                REMOTE_IPS=$(ss -ntp 2>/dev/null | grep -E ",pid=($p_regex)," | awk '{print $5}' | rev | cut -d: -f2- | rev | sort -u | tr -d '[]')
+            fi
             
             # 2. If no direct TCP (e.g. NFS/SMB Mount), trace from the destination path
             if [ -z "$REMOTE_IPS" ] && [[ "$dest" == /* ]]; then
@@ -328,6 +343,7 @@ CACHED_IFACE=""
                 
                 if [ -n "$SRC_IP" ] && [ -n "$IFACE_USED" ]; then
                     UNIQUE_PATHS["${SRC_IP} (${IFACE_USED}) ➔ ${R_IP}"]=1
+                    GLOBALLY_USED_IFACES["$IFACE_USED"]=1
                 fi
             done
             
@@ -339,7 +355,43 @@ CACHED_IFACE=""
         echo -e "   ${GREY}   (No routes to display)${NC}${K}"
     fi
 
-    # [C] STORAGE STATUS
+    # [C] NETWORK INTERFACES MONITOR
+    echo -e "${K}\n${Y}[ 🌐 NETWORK INTERFACE STATUS ]${NC}${K}"
+    printf " %-12s %-16s %-16s %-16s %s${K}\n" "INTERFACE" "IP ADDRESS" "RX SPEED" "TX SPEED" "STATUS"
+    echo -e "───────────────────────────────────────────────────────────────────────────────────────────────${K}"
+    
+    # Calculate per-interface speeds
+    NOW_SEC=$(date +%s)
+    DELTA_T=$((NOW_SEC - PREV_SEC)); [[ $DELTA_T -eq 0 ]] && DELTA_T=1
+    while read -r line; do
+        [[ "$line" != *":"* ]] && continue
+        iface=$(echo "$line" | cut -d: -f1 | xargs)
+        [[ "$iface" == "lo" ]] && continue
+        
+        rx=$(echo "$line" | awk '{print $2}')
+        tx=$(echo "$line" | awk '{print $10}')
+        
+        rx_spd=0; tx_spd=0
+        if [[ -n "${PREV_IF_RX[$iface]}" ]]; then
+            rx_spd=$(( (rx - ${PREV_IF_RX[$iface]}) / DELTA_T ))
+            tx_spd=$(( (tx - ${PREV_IF_TX[$iface]}) / DELTA_T ))
+        fi
+        PREV_IF_RX["$iface"]=$rx
+        PREV_IF_TX["$iface"]=$tx
+        
+        status="${GREY}Idle${NC}"
+        if [[ -n "${GLOBALLY_USED_IFACES[$iface]}" ]]; then status="${G}ACTIVE${NC}"; fi
+        
+        ip_addr=${IFACE_IP_CACHE["$iface"]:-"-"}
+        
+        # Color interfaces with traffic
+        if [[ $rx_spd -gt 10240 || $tx_spd -gt 10240 ]]; then col=$W; else col=$NC; fi
+        
+        printf " ${col}%-12s${NC} %-16s %-16s %-16s %b${NC}${K}\n" "$iface" "$ip_addr" "$(human_size $rx_spd)/s" "$(human_size $tx_spd)/s" "$status"
+    done < /proc/net/dev
+    PREV_SEC=$NOW_SEC
+
+    # [D] STORAGE STATUS
     echo -e "${K}\n${Y}[ 💾 STORAGE STATUS (MAIN DRIVES) ]${NC}${K}"
     echo -e "───────────────────────────────────────────────────────────────────────────────────────────────${K}"
     printf " %-24s %-9s %-9s %-7s %s${K}\n" "MOUNT POINT" "SIZE" "FREE" "USE%" "SOURCE"
