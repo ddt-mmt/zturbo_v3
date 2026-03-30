@@ -245,13 +245,15 @@ post_execution_verification() {
             echo "0 0" > "/tmp/zturbo_dest_$$"; return
         fi
 
-        # Tentukan path tujuan berdasarkan apakah itu direktori atau file
-        if [[ -d "$dest_root" ]]; then # Destination is a directory
+        # Tentukan path tujuan berdasarkan jumlah sumber
+        if [[ ${#source_paths[@]} -eq 1 ]]; then
+            # Jika hanya satu sumber, destinasi akhir adalah DEST itu sendiri
+            dest_target_paths+=("$dest_root")
+        else
+            # Jika banyak sumber, destinasi akhir adalah DEST/basename(source)
             for src_path in "${source_paths[@]}"; do
                 dest_target_paths+=("$dest_root/$(basename "$src_path")")
             done
-        else # Destination is a single file
-            dest_target_paths+=("$dest_root")
         fi
 
         # Periksa apakah path tujuan ada sebelum mencoba menghitung
