@@ -152,7 +152,7 @@ declare -A IFACE_IP_CACHE
 
     # --- HEADER DISPLAY ---
     MEM_GUARD=$(( MEM_TOT * 20 / 100 )); MEM_SAFE=$(( MEM_TOT * 80 / 100 ))
-    MAX_THREADS_SAFE=$(( MEM_SAFE / 60 )); [ $MAX_THREADS_SAFE -lt 2 ] && MAX_THREADS_SAFE=2
+    MAX_THREADS_SAFE=$(( MEM_SAFE / 64 )); [ $MAX_THREADS_SAFE -lt 1 ] && MAX_THREADS_SAFE=1
 
     # IP Display optimization
     IP_COUNT=$(echo $MY_IP_LIST | wc -w)

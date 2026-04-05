@@ -66,7 +66,12 @@ while true; do
         # --- FINAL CONFIRMATION ---
         while true; do
             REC_THREADS=$(calc_optimal_threads "$CURRENT_MODE")
-            if [[ -z "$MANUAL_THREADS" ]]; then THREADS=$REC_THREADS; fi
+            if [[ -n "$MANUAL_THREADS" ]]; then
+                THREADS=$MANUAL_THREADS
+            else
+                THREADS=$REC_THREADS
+            fi
+            
             if [[ "$CURRENT_MODE" == "SAFE" ]]; then MODE_MSG="${BOLD_GREEN}SAFE${NC}"; else MODE_MSG="${BOLD_RED}TURBO${NC}"; fi
             
             if [[ "$SUB_FOLDER" == "." ]]; then DEST="${DEST_ROOT%/}/"
@@ -100,7 +105,14 @@ while true; do
                 1) select_source ;;
                 2) select_dest ;;
                 3) read -e -p "New Folder Name: " -i "$SUB_FOLDER" SUB_FOLDER ;; 
-                4) read -e -p " Set Threads manually: " MANUAL_THREADS || exit 1 ;; 
+                4) 
+                    read -e -p " Set Threads manually (Leave blank for Auto): " MANUAL_THREADS || exit 1
+                    if [[ -n "$MANUAL_THREADS" ]] && ! [[ "$MANUAL_THREADS" =~ ^[0-9]+$ ]]; then
+                        echo -e "${BOLD_RED}Invalid input. Please enter a number.${NC}"
+                        MANUAL_THREADS=""
+                        sleep 1
+                    fi
+                    ;; 
                 5) [[ "$CURRENT_MODE" == "SAFE" ]] && CURRENT_MODE="TURBO" || CURRENT_MODE="SAFE" ;;
             esac
         done

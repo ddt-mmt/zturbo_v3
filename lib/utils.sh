@@ -119,21 +119,26 @@ calc_optimal_threads() {
     local cores=$(nproc)
     local mem_total_mb=$(free -m | grep Mem | awk '{print $2}')
     local mem_usable_mb=$(( mem_total_mb * 80 / 100 )) 
-    local max_threads_ram=$(( mem_usable_mb / 60 ))
-    [ $max_threads_ram -lt 2 ] && max_threads_ram=2
+    local max_threads_ram=$(( mem_usable_mb / 64 )) # Slightly more RAM per thread
+    [ $max_threads_ram -lt 1 ] && max_threads_ram=1
     
     local target_threads=1
     
     if [[ "$mode" == "SAFE" ]]; then
-        target_threads=$(awk -v c="$cores" 'BEGIN {printf "%.0f", c * 0.75}')
+        # SAFE mode: target 50% of cores
+        target_threads=$(awk -v c="$cores" 'BEGIN {printf "%.0f", c * 0.5}')
         [ $target_threads -lt 1 ] && target_threads=1
     else
-        target_threads=$(( cores * 4 ))
+        # TURBO mode: target 2x cores, capped at 24 to prevent overwhelming system
+        target_threads=$(( cores * 2 ))
         [ $target_threads -gt 24 ] && target_threads=24
+        [ $target_threads -lt 2 ] && target_threads=2
     fi
     
     if [[ $target_threads -gt $max_threads_ram ]]; then target_threads=$max_threads_ram; fi
-    [ $target_threads -gt 1024 ] && target_threads=1024
+    
+    # Final safety cap
+    [ $target_threads -gt 512 ] && target_threads=512
     echo "$target_threads"
 }
 
