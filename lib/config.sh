@@ -4,8 +4,8 @@
 CPU_CORES=$(nproc)
 CURRENT_MODE="SAFE" 
 FILES_PER_JOB=2500
-DASHBOARD_DIR="/dev/shm/zturbo_v2_dashboard"
-REPORT_DIR="$HOME/.zturbo_v2/reports"
+DASHBOARD_DIR="/dev/shm/zturbo_v3_dashboard"
+REPORT_DIR="$HOME/.zturbo_v3/reports"
 
 # --- STYLES ---
 BOLD_GREEN=$'\e[1;32m'; BOLD_YELLOW=$'\e[1;33m'; BOLD_CYAN=$'\e[1;36m'

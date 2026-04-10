@@ -2,8 +2,8 @@
 # ZTURBO DEB Builder Script
 # Usage: ./build_deb.sh [version]
 
-VERSION=${1:-"1.3.1"}
-PKG_NAME="zturbo"
+VERSION=${1:-"3.0.0"}
+PKG_NAME="zturbo_v3"
 ARCH="all"
 MAINTAINER="Didit <ddt-mmt@github>"
 DESC="High Performance Data Transfer Engine (Enterprise Edition)"
@@ -20,9 +20,9 @@ rm -rf "$WORK_DIR"
 mkdir -p "$DEB_DIR" "$BIN_DIR" "$DOC_DIR"
 
 # 2. Copy Binaries
-cp ../zturbo "$BIN_DIR/"
-cp ../zmturbo "$BIN_DIR/"
-chmod 755 "$BIN_DIR/zturbo" "$BIN_DIR/zmturbo"
+cp ../zturbo_v3 "$BIN_DIR/"
+cp ../zmturbo_v3 "$BIN_DIR/"
+chmod 755 "$BIN_DIR/zturbo_v3" "$BIN_DIR/zmturbo_v3"
 
 # 3. Copy Docs
 cp ../README.md "$DOC_DIR/"

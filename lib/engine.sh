@@ -341,3 +341,121 @@ EOF
     echo -e "\n✅ ${BOLD_GREEN}COMPLETED!${NC} Report saved to $REPORT_TXT"
     echo -e "Status: $FINAL_STATUS"
 }
+
+# --- URL DOWNLOAD ENGINE ---
+
+# Parses progress from wget
+parse_wget_progress() {
+    local total_bytes=$(cat "${JOB_DIR}/total_size")
+    local current_file=$(basename "$DOWNLOAD_URL")
+
+    # Regex to capture wget's progress line
+    local re="([0-9,]+) +([0-9]{1,3})% +([0-9.,]+[KMGT]?B/s)"
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ $re ]]; then
+            local bytes_str="${BASH_REMATCH[1]}"
+            local bytes_transferred=$(echo "$bytes_str" | tr -d ',')
+            local progress_percent="${BASH_REMATCH[2]}%"
+            local current_speed="${BASH_REMATCH[3]}"
+            
+            echo "${bytes_transferred}|${total_bytes}|${progress_percent}|${current_speed}|${current_file}|IN_PROGRESS" > "${JOB_STATUS_FILE}"
+        fi
+    done
+    
+    # Assuming if the loop finishes, the download was successful
+    local final_bytes=$(cat "${JOB_DIR}/total_size")
+    echo "${final_bytes}|${total_bytes}|100%|0B/s|${current_file}|COMPLETED" > "${JOB_STATUS_FILE}"
+}
+
+# Parses progress from aria2c
+parse_aria2c_progress() {
+    local total_bytes=$(cat "${JOB_DIR}/total_size")
+    local current_file=$(basename "$DOWNLOAD_URL")
+
+    # Regex for aria2c's summary line: [#ID SIZE(PERCENT) CN:CONNS DL:SPEED]
+    local re="\[#.{5} +([0-9.KMGTiB]+)\/([0-9.KMGTiB]+)\(([0-9]+)%\) CN:([0-9]+) DL:([0-9.KMGTB/s]+)\]"
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ $re ]]; then
+            local bytes_transferred_human="${BASH_REMATCH[1]}"
+            # Convert human readable size to bytes for consistency if needed, but for now, we have percent
+            local progress_percent="${BASH_REMATCH[3]}%"
+            local current_speed="${BASH_REMATCH[5]}"
+            
+            # A bit of a hack: we don't get raw bytes from aria2c easily, so we calculate it
+            local total_b=$(cat "${JOB_DIR}/total_size")
+            local percent_val=${BASH_REMATCH[3]}
+            local bytes_transferred=$(( total_b * percent_val / 100 ))
+
+            echo "${bytes_transferred}|${total_bytes}|${progress_percent}|${current_speed}|${current_file}|IN_PROGRESS" > "${JOB_STATUS_FILE}"
+        fi
+    done
+    
+    local final_bytes=$(cat "${JOB_DIR}/total_size")
+    echo "${final_bytes}|${total_bytes}|100%|0B/s|${current_file}|COMPLETED" > "${JOB_STATUS_FILE}"
+}
+
+
+# Main URL download function
+url_downloader() {
+    local url="$1"
+    local dest_dir="$2"
+    
+    export DOWNLOAD_URL="$url" # Export for parsers to use
+
+    echo ">> Analyzing URL: $url"
+    # Get headers using curl
+    headers=$(curl -sI "$url")
+    
+    # Get file size
+    content_length=$(echo "$headers" | grep -i content-length | awk '{print $2}' | tr -d '\r')
+    
+    if [[ -z "$content_length" ]] || [[ "$content_length" -le 0 ]]; then
+        echo "   ❌ Could not determine file size. Cannot monitor progress."
+        # Fallback to a simple wget without monitoring
+        wget -P "$dest_dir" "$url"
+        if [[ $? -eq 0 ]]; then
+             echo "✅ Download finished (unmonitored)."
+        else
+             echo "❌ Download failed (unmonitored)."
+        fi
+        return 1
+    fi
+    
+    echo "$content_length" > "${JOB_DIR}/total_size"
+    write_job_info "URL Download" "$url" "$dest_dir" "$content_length"
+
+    # Check for multistream support (Accept-Ranges: bytes)
+    multistream_support=$(echo "$headers" | grep -i "Accept-Ranges: bytes")
+    
+    # Check if aria2c is installed
+    if command -v aria2c >/dev/null 2>&1 && [[ -n "$multistream_support" ]]; then
+        echo ">> Starting multistream download with aria2c..."
+        local threads=$(calc_optimal_threads "TURBO") # Use TURBO threads for aria
+        (
+            aria2c -x"$threads" -s"$threads" --summary-interval=1 --console-log-level=info --file-allocation=none -c -d "$dest_dir" "$url"
+            echo $? > "${JOB_DIR}/downloader_exit_status"
+        ) 2>&1 | parse_aria2c_progress
+    else
+        echo ">> Starting single stream download with wget..."
+        (
+            wget --progress=bar:force -c -P "$dest_dir" "$url"
+            echo $? > "${JOB_DIR}/downloader_exit_status"
+        ) 2>&1 | parse_wget_progress
+    fi
+    
+    wait
+    
+    local exit_status=$(cat "${JOB_DIR}/downloader_exit_status")
+    rm -f "${JOB_DIR}/downloader_exit_status"
+    
+    if [[ "$exit_status" -eq 0 ]]; then
+        JOB_COMPLETED=true
+        echo "✅ Download complete."
+        return 0
+    else
+        echo "❌ Download failed with exit code $exit_status."
+        return 1
+    fi
+}

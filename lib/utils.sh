@@ -58,16 +58,29 @@ cleanup() {
         return 0
     fi
 
+    # Ambil PGID (Process Group ID) untuk membunuh seluruh keluarga proses
+    local pgid=$(ps -o pgid= -p $$ | xargs 2>/dev/null)
+
     # echo ">> [DEBUG] cleanup called. Removing ${JOB_DIR}" # Optional debug
     rm -rf "${JOB_DIR}" 2>/dev/null # Hapus seluruh direktori pekerjaan
     rm -rf "${BROWSER_DIR}" 2>/dev/null # Hapus direktori cache browser
     rm -f /tmp/dt_src_$$ /tmp/dt_dest_$$ /tmp/zturbo_size_$$ 2>/dev/null
     
-    # Bunuh proses-proses latar belakang
-    if [[ -n "${CURRENT_SIZE_CALC_PID}" ]]; then kill "${CURRENT_SIZE_CALC_PID}" 2>/dev/null; fi
-    if [[ -n "${GOV_PID}" ]]; then kill "${GOV_PID}" 2>/dev/null; fi
-    if [[ ${#BG_PIDS[@]} -gt 0 ]]; then kill "${BG_PIDS[@]}" 2>/dev/null; fi
-    pkill -P $$ 2>/dev/null
+    # Bunuh proses-proses latar belakang dan seluruh process group
+    # Gunakan "-" sebelum PGID untuk membunuh seluruh grup
+    if [[ -n "$pgid" ]]; then
+        # Kirim SIGTERM ke seluruh grup, kecuali proses ini sendiri (akan keluar nanti)
+        # Kita gunakan pkill --pgid agar lebih bersih jika tersedia, atau kill -TERM -PGID
+        # Untuk keamanan, kita bunuh anak-anak dulu baru grup jika perlu
+        pkill -P $$ 2>/dev/null
+        
+        # Berikan sedikit waktu untuk proses anak merespon TERM
+        sleep 0.2
+        
+        # Paksa bunuh sisa proses di grup yang sama (rsync, fpsync, dsb)
+        # Jangan bunuh diri sendiri dulu agar script bisa menyelesaikan penulisan report
+        kill -TERM -"$pgid" 2>/dev/null
+    fi
 
     if [[ "$JOB_COMPLETED" == false ]]; then
         if [[ -f "$REPORT_TXT" ]]; then
@@ -76,7 +89,9 @@ STATUS      : CANCELLED/FAILED (Interrupted)" >> "$REPORT_TXT"
             echo "----------------------------------------------------------------" >> "$REPORT_TXT"
         fi
         echo -e "
-${BOLD_RED}❌ Process Interrupted (Ctrl+C). Cleaning up...${NC}"
+${BOLD_RED}❌ Process Interrupted (Ctrl+C). Cleaning up background jobs...${NC}"
+        # Berikan jeda singkat agar user bisa melihat pesan
+        sleep 1
     fi
 }
 
@@ -156,12 +171,22 @@ calculate_total_source_size() {
 
 # Menulis informasi pekerjaan ke file untuk dibaca oleh zmturbo
 write_job_info() {
-    local source_list=""
-    for s in "${SELECTED_PATHS[@]}"; do
-        source_list+="${s};"
-    done
     # Format: JOB_ID|USER|MODE|DESTINATION|SOURCES_LIST|TOTAL_SIZE
-    echo "${JOB_ID}|${REAL_USER}|${CURRENT_MODE}|${DEST}|${source_list%?}|$(cat "${JOB_DIR}/total_size")" > "${JOB_INFO_FILE}"
+    if [[ $# -gt 0 ]]; then
+        # New URL Download mode
+        local job_type="$1"
+        local url="$2"
+        local dest_path="$3"
+        local total_size="$4"
+        echo "${JOB_ID}|${REAL_USER}|${job_type}|${dest_path}|${url}|${total_size}" > "${JOB_INFO_FILE}"
+    else
+        # Original File Transfer mode
+        local source_list=""
+        for s in "${SELECTED_PATHS[@]}"; do
+            source_list+="${s};"
+        done
+        echo "${JOB_ID}|${REAL_USER}|${CURRENT_MODE}|${DEST}|${source_list%?}|$(cat "${JOB_DIR}/total_size")" > "${JOB_INFO_FILE}"
+    fi
 }
 
 # Menghitung ukuran file/folder di latar belakang dengan prioritas rendah
