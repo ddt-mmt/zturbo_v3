@@ -124,6 +124,9 @@ run_url_download_wizard() {
     
     echo "Press any key to return to the main menu."
     read -n 1
+    # Cleanup job dir so it disappears from monitor after user sees the result
+    rm -rf "$JOB_DIR" 2>/dev/null
+    init_job_dir # Re-initialize for the next potential job in the same session
 }
 
 # Main menu to select the mode
@@ -260,6 +263,12 @@ EOF
 
     # --- VERIFICATION ---
     post_execution_verification
+    
+    echo "Press any key to return to the main menu."
+    read -n 1
+    # Cleanup job dir so it disappears from monitor
+    rm -rf "$JOB_DIR" 2>/dev/null
+    init_job_dir # Re-initialize for next potential job
 }
 
 # Start the main menu
