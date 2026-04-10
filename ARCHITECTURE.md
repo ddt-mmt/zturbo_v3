@@ -1,4 +1,4 @@
-# ZTURBO Architecture Blueprint (V1.3.5 Modular & Refined)
+# ZTURBO Architecture Blueprint (V3.0.0 Modular & Refined)
 
 ## 1. High-Level Overview
 
