@@ -7,7 +7,7 @@ print_header() {
     clear
     MY_IP=$(hostname -I | awk '{print $1}')
     echo -e "${BOLD_GREEN}==========================================${NC}"
-    echo -e "${BOLD_GREEN} ZTURBO V1.3.5 (MODULAR)${NC}"
+    echo -e "${BOLD_GREEN} ZTURBO V3.0.0 (MODULAR)${NC}"
     echo -e "${BOLD_GREEN}==========================================${NC}"
     echo -e "👤 USER: ${BOLD_YELLOW}$REAL_USER${NC} | 🌐 IP: ${BOLD_MAGENTA}$MY_IP${NC} | 💾 MODE: $CURRENT_MODE"
     echo -e "------------------------------------------"
