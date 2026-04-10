@@ -116,7 +116,12 @@ run_url_download_wizard() {
     
     # The url_downloader function will block until it's done.
     # We can add post-download verification here if needed.
-    echo -e "\n✅ ${BOLD_GREEN}DOWNLOAD PROCESS FINISHED.${NC}"
+    if [[ $? -eq 0 ]]; then
+        post_download_verification "$url" "$DEST_ROOT_URL"
+    else
+        echo -e "\n❌ ${BOLD_RED}DOWNLOAD PROCESS FAILED.${NC}"
+    fi
+    
     echo "Press any key to return to the main menu."
     read -n 1
 }

@@ -459,3 +459,66 @@ url_downloader() {
         return 1
     fi
 }
+
+# --- VERIFIKASI PASCA DOWNLOAD ---
+post_download_verification() {
+    local url="$1"
+    local dest_dir="$2"
+    local filename=$(basename "$url")
+    local dest_path="${dest_dir%/}/${filename}"
+    
+    echo -e "\n${BOLD_YELLOW}🔎 VERIFYING DOWNLOAD INTEGRITY...${NC}"
+    
+    local EXPECTED_BYTES=0
+    if [[ -f "${JOB_DIR}/total_size" ]]; then
+        EXPECTED_BYTES=$(cat "${JOB_DIR}/total_size")
+    fi
+    
+    local ACTUAL_BYTES=0
+    if [[ -f "$dest_path" ]]; then
+        ACTUAL_BYTES=$(stat -c%s "$dest_path" 2>/dev/null || echo 0)
+    fi
+    
+    local SIZE_STATUS="MISMATCH ❌"
+    local FINAL_STATUS="FAILED"
+    
+    if [[ "$EXPECTED_BYTES" -eq "$ACTUAL_BYTES" && "$EXPECTED_BYTES" -gt 0 ]]; then
+        SIZE_STATUS="MATCH ✅"
+        FINAL_STATUS="SUCCESS ✅"
+    elif [[ "$EXPECTED_BYTES" -eq 0 ]]; then
+        FINAL_STATUS="UNKNOWN (Size not determined)"
+    fi
+    
+    END_TIME=$(date +%s)
+    local FINISH_DATE=$(date)
+    local DURATION=$((END_TIME - START_TIME))
+    local DUR_FMT=$(format_duration $DURATION)
+    local AVG_SPEED="0 B/s"
+    if [[ $DURATION -gt 0 && $ACTUAL_BYTES -gt 0 ]]; then
+        local spd=$(( ACTUAL_BYTES / DURATION ))
+        AVG_SPEED="$(human_size $spd)/s"
+    fi
+
+    cat <<EOF >> "$REPORT_TXT"
+
+================================================================
+                  RECONCILIATION REPORT (DOWNLOAD)
+================================================================
+METRIC         EXPECTED          ACTUAL            STATUS
+----------------------------------------------------------------
+Total Data     $(printf "%-17s" "$(human_size $EXPECTED_BYTES)") $(printf "%-17s" "$(human_size $ACTUAL_BYTES)") $SIZE_STATUS
+----------------------------------------------------------------
+URL            : $url
+Destination    : $dest_path
+----------------------------------------------------------------
+Started        : $START_DATE
+Finished       : $FINISH_DATE
+Download Time  : $DUR_FMT
+Average Speed  : $AVG_SPEED
+Final Status   : $FINAL_STATUS
+================================================================
+EOF
+
+    echo -e "\n✅ ${BOLD_GREEN}DOWNLOAD COMPLETED!${NC} Report saved to $REPORT_TXT"
+    echo -e "Status: $FINAL_STATUS"
+}
