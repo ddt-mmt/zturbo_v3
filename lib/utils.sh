@@ -128,6 +128,16 @@ format_duration() { printf "%02dh:%02dm:%02ds" $(($1/3600)) $(($(( $1%3600 ))/60
 # Mengonversi ukuran dalam byte ke format yang mudah dibaca manusia
 human_size() { numfmt --to=iec-i --suffix=B $1 2>/dev/null || echo "$1 B"; }
 
+# Mengonversi kecepatan byte ke format bandwidth jaringan (bits per second)
+fmt_bps() {
+    local bytes_per_sec=$1
+    local bits_per_sec=$(( bytes_per_sec * 8 ))
+    if [[ $bits_per_sec -ge 1000000000 ]]; then awk -v v=$bits_per_sec 'BEGIN{printf "%.1f Gbps", v/1000000000}'
+    elif [[ $bits_per_sec -ge 1000000 ]]; then awk -v v=$bits_per_sec 'BEGIN{printf "%.1f Mbps", v/1000000}'
+    elif [[ $bits_per_sec -ge 1000 ]]; then awk -v v=$bits_per_sec 'BEGIN{printf "%.1f Kbps", v/1000}'
+    else echo "${bits_per_sec} bps"; fi
+}
+
 # Menghitung jumlah thread optimal berdasarkan mode dan sumber daya sistem
 calc_optimal_threads() {
     local mode="$1"

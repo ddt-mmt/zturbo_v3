@@ -304,7 +304,7 @@ post_execution_verification() {
     local AVG_SPEED="0 B/s"
     if [[ $DURATION -gt 0 ]]; then
         local spd=$(( DEST_BYTES / DURATION ))
-        AVG_SPEED="$(human_size $spd)/s"
+        AVG_SPEED="$(human_size $spd)/s ($(fmt_bps $spd))"
     fi
     
     local H_SRC_BYTES=$(human_size $SRC_BYTES)
@@ -496,7 +496,7 @@ post_download_verification() {
     local AVG_SPEED="0 B/s"
     if [[ $DURATION -gt 0 && $ACTUAL_BYTES -gt 0 ]]; then
         local spd=$(( ACTUAL_BYTES / DURATION ))
-        AVG_SPEED="$(human_size $spd)/s"
+        AVG_SPEED="$(human_size $spd)/s ($(fmt_bps $spd))"
     fi
 
     cat <<EOF >> "$REPORT_TXT"
