@@ -11,40 +11,40 @@
 ## 🔥 Key Features (V3.0.0 Optimized & Enhanced)
 
 ### 1. ⚙️ Smart Resource & Thread Management
-*   **🧠 Conservative Thread Auto-Scaling**: Algoritma kalkulasi thread kini lebih "sopan" terhadap server berspesifikasi rendah ("server kentang").
-    *   **TURBO Mode**: 2x CPU Cores (sebelumnya 4x) untuk stabilitas maksimal.
-    *   **SAFE Mode**: 0.5x CPU Cores untuk penggunaan latar belakang yang sangat ringan.
-*   **🛠️ Manual Thread Override**: Sekarang Anda dapat mengedit jumlah thread secara manual di layar konfirmasi akhir dengan menekan tombol **[4]**. Mendukung validasi angka dan opsi kembali ke otomatis (kosongkan input).
-*   **💾 RAM-Aware Scaling**: Estimasi penggunaan RAM per thread ditingkatkan menjadi 64MB untuk mencegah sistem *OOM (Out Of Memory)* pada VM kecil.
+*   **🧠 Conservative Thread Auto-Scaling**: The thread calculation algorithm is now more "polite" toward low-specification servers.
+    *   **TURBO Mode**: 2x CPU Cores (previously 4x) for maximum stability.
+    *   **SAFE Mode**: 0.5x CPU Cores for lightweight background usage.
+*   **🛠️ Manual Thread Override**: You can now manually edit the number of threads on the final confirmation screen by pressing **[4]**. Supports number validation and an option to return to automatic (leave input empty).
+*   **💾 RAM-Aware Scaling**: RAM usage estimation per thread has been increased to 64MB to prevent *OOM (Out Of Memory)* on small VMs.
 
 ### 2. ⚡ Zero I/O Lag Architecture
-*   **🧠 RAM-Disk IPC**: Semua Inter-Process Communication (IPC), file status monitoring, dan cache UI browser kini disimpan di **RAM (`/dev/shm`)**.
-*   **🚀 Zero Disk Overhead**: Monitoring transfer dan navigasi UI menggunakan 0% bandwidth Hardisk/SSD Anda, memastikan 100% kinerja penyimpanan didedikasikan untuk transfer data.
+*   **🧠 RAM-Disk IPC**: All Inter-Process Communication (IPC), file status monitoring, and browser UI cache are now stored in **RAM (`/dev/shm`)**.
+*   **🚀 Zero Disk Overhead**: Transfer monitoring and UI navigation use 0% of your Hard Disk/SSD bandwidth, ensuring 100% of storage performance is dedicated to data transfer.
 
 ### 3. 📊 Ultra-Responsive Monitoring (ZMTURBO_V3)
-*   **⏱️ 1-Second Real-time Refresh**: Progress bar dan kecepatan diperbarui setiap detik (mulus).
-*   **📡 Dual-Format Bandwidth**: Menampilkan kecepatan jaringan dalam **MB/s (Ukuran File)** dan **Mbps/Gbps (Bandwidth Jaringan)**.
-*   **🟢 Smooth Progress Bar**: Interpolasi presisi tinggi memastikan progress bar bergerak mulus.
-*   **✨ Progress Bar Ultra-Andal**: Kini secara adaptif menggunakan output JSON dari `rsync` (jika didukung oleh `rsync` v3.1.0+ Anda) untuk keandalan dan akurasi yang lebih tinggi.
-*   **📏 Consistent Limits**: Tampilan batas thread di `zmturbo` kini sinkron dengan logika kalkulasi di mesin utama.
+*   **⏱️ 1-Second Real-time Refresh**: Progress bars and speeds are updated every second for smooth visual feedback.
+*   **📡 Dual-Format Bandwidth**: Displays network speed in both **MB/s (File Size)** and **Mbps/Gbps (Network Bandwidth)**.
+*   **🟢 Smooth Progress Bar**: High-precision interpolation ensures the progress bar moves smoothly.
+*   **✨ Ultra-Reliable Progress Bar**: Now adaptively uses JSON output from `rsync` (if supported by your `rsync` v3.1.0+) for higher reliability and accuracy.
+*   **📏 Consistent Limits**: Thread limit displays in `zmturbo` are now synchronized with the calculation logic in the main engine.
 
-### 3. 📜 Enterprise Reconciliation & History
-*   **🕵️ Detailed Audit Logs**: Laporan mencakup Waktu Mulai, Waktu Selesai, Jalur Sumber, dan Jalur Tujuan untuk ketertelusuran penuh.
-*   **📏 Human-Readable Reports**: Semua ukuran file dalam riwayat dikonversi otomatis (misal, `1.2TB` daripada `1200000000`).
-*   **📂 Permanent Archive**: Meskipun data monitoring berada di RAM, riwayat transfer Anda disimpan permanen di disk (`~/.zturbo_v3/reports`).
-*   **⚡ Verifikasi Pasca-Transfer Cepat**: Proses verifikasi file setelah transfer selesai jauh lebih cepat dengan memfokuskan pengecekan hanya pada item yang ditransfer, mengurangi beban I/O.
+### 4. 📜 Enterprise Reconciliation & History
+*   **🕵️ Detailed Audit Logs**: Reports include Start Time, End Time, Source Path, and Destination Path for full traceability.
+*   **📏 Human-Readable Reports**: All file sizes in the history are automatically converted (e.g., `1.2TB` instead of `1200000000`).
+*   **📂 Permanent Archive**: Although monitoring data resides in RAM, your transfer history is saved permanently on disk (`~/.zturbo_v3/reports`).
+*   **⚡ Fast Post-Transfer Verification**: The file verification process after transfer completion is significantly faster by focusing checks only on the transferred items, reducing I/O load.
 
-### 4. 🚀 Hybrid Parallel Engine
-*   **🏎️ TURBO Mode**: Memanfaatkan `fpsync` dan multi-threaded `rsync` untuk menjenuhkan pipa jaringan 10G/40G/100G.
-*   **🛡️ SAFE Mode**: Memprioritaskan stabilitas sistem dengan prioritas latar belakang `nice` dan `ionice`.
-*   **🔒 Keamanan & Keandalan Ditingkatkan**: Penggunaan `eval` yang berpotensi tidak aman telah dihilangkan, diganti dengan metode eksekusi perintah yang lebih modern dan tangguh, meningkatkan keamanan kode.
+### 5. 🚀 Hybrid Parallel Engine
+*   **🏎️ TURBO Mode**: Utilizes `fpsync` and multi-threaded `rsync` to saturate 10G/40G/100G network pipes.
+*   **🛡️ SAFE Mode**: Prioritizes system stability with background priorities (`nice` and `ionice`).
+*   **🔒 Enhanced Security & Reliability**: Potentially unsafe `eval` usage has been removed and replaced with modern, robust execution methods, improving code security.
 
-### 5. 🖥️ UI Direktori Sangat Responsif (ZTURBO)
-*   **💨 Navigasi Instan**: Penjelajahan direktori di `zturbo` tidak akan lagi "macet" atau lambat, bahkan di direktori besar, berkat sistem kalkulasi ukuran file di latar belakang yang cerdas, efisien, dan "sopan".
-*   **🧠 Cache RAM-Disk**: Ukuran file dan folder dihitung secara asinkron dan di-cache di RAM-disk untuk pembaruan UI yang sangat cepat.
+### 6. 🖥️ Ultra-Responsive Directory UI (ZTURBO)
+*   **💨 Instant Navigation**: Directory browsing in `zturbo` will no longer "hang" or slow down, even in large directories, thanks to a smart and efficient background file size calculation system.
+*   **🧠 RAM-Disk Cache**: File and folder sizes are calculated asynchronously and cached in the RAM-disk for ultra-fast UI updates.
 
-### 6. ⚙️ Manajemen Dependensi Cerdas
-*   **💡 Umpan Balik Proaktif**: `zturbo` sekarang memberikan peringatan yang membantu jika versi `rsync` Anda tidak mendukung fitur optimal (seperti output JSON), memungkinkan Anda mengambil tindakan untuk pengalaman terbaik.
+### 7. ⚙️ Smart Dependency Management
+*   **💡 Proactive Feedback**: `zturbo` now provides helpful warnings if your `rsync` version does not support optimal features (like JSON output), allowing you to take action for the best experience.
 
 ---
 
